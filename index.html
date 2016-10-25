@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script src="http://code.jquery.com/jquery-latest.min.js"></script>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/raphael/2.1.0/raphael-min.js" type="text/javascript"></script>
+</head>
+<body>
+<input id="newShapeEnable" type="checkbox"/> - Enable add new shape
+<div id="canvas" style="width: 100%; height: 100%; cursor: pointer"></div>
+<script>
+    var zoomInit = 10, minZoom = 0, zoomStep = 0.01, maxZoom = 90, zoomCurrent = 10;
+    (function () {
+
+        function findPos(obj) {
+            var posX = obj.offsetLeft, posY = obj.offsetTop, posArray;
+            while (obj.offsetParent) {
+                if (obj === document.getElementsByTagName('body')[0]) {
+                    break;
+                } else {
+                    posX = posX + obj.offsetParent.offsetLeft;
+                    posY = posY + obj.offsetParent.offsetTop;
+                    obj = obj.offsetParent;
+                }
+            }
+            posArray = [posX, posY];
+            return posArray;
+        }
+
+        function getRelativePosition(e, obj) {
+            var x, y, pos;
+            if (e.pageX || e.pageY) {
+                x = e.pageX;
+                y = e.pageY;
+            } else {
+                x = e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft;
+                y = e.clientY + document.body.scrollTop + document.documentElement.scrollTop;
+            }
+
+            pos = findPos(obj);
+            x -= pos[0];
+            y -= pos[1];
+
+            return { x: x, y: y };
+        }
+
+        var panZoomFunctions = {
+                    enable: function () {
+                        this.enabled = true;
+                    },
+
+                    disable: function () {
+                        this.enabled = false;
+                    },
+
+                    zoomEnable: function () {
+                        this.zoomEnabled = true;
+                    },
+
+                    zoomDisable: function () {
+                        this.zoomEnabled = false;
+                    },
+
+                    zoomIn: function (steps) {
+                        this.applyZoom(steps);
+                    },
+
+                    zoomOut: function (steps) {
+                        this.applyZoom(steps > 0 ? steps * -1 : steps);
+                    },
+
+                    pan: function (deltaX, deltaY) {
+                        this.applyPan(deltaX * -1, deltaY * -1);
+                    },
+
+                    isDragging: function () {
+                        return this.dragTime > this.dragThreshold;
+                    },
+
+                    getCurrentPosition: function () {
+                        return this.currPos;
+                    },
+
+                    getCurrentZoom: function () {
+                        return this.currZoom;
+                    }
+                },
+
+                PanZoom = function (el, options) {
+                    var paper = el,
+                            container = paper.canvas.parentNode,
+                            me = this,
+                            settings = {},
+                            initialPos = { x: 0, y: 0 },
+                            deltaX = 0,
+                            deltaY = 0,
+                            mousewheelevt = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel";
+
+                    this.enabled = false;
+                    this.zoomEnabled = false;
+                    this.dragThreshold = 5;
+                    this.dragTime = 0;
+
+                    options = options || {};
+
+                    settings.maxZoom = options.maxZoom || 9;
+                    settings.minZoom = options.minZoom || 0;
+                    settings.zoomStep = options.zoomStep || 0.1;
+                    settings.initialZoom = options.initialZoom || 0;
+                    settings.initialPosition = options.initialPosition || { x: 0, y: 0 };
+
+                    this.currZoom = settings.initialZoom;
+                    this.currPos = settings.initialPosition;
+
+                    function repaint() {
+                        me.currPos.x = me.currPos.x + deltaX;
+                        me.currPos.y = me.currPos.y + deltaY;
+
+                        var newWidth = paper.width * (1 - (me.currZoom * settings.zoomStep)),
+                                newHeight = paper.height * (1 - (me.currZoom * settings.zoomStep));
+
+                        if (me.currPos.x < 0) {
+                            me.currPos.x = 0;
+                        } else if (me.currPos.x > (paper.width * me.currZoom * settings.zoomStep)) {
+                            me.currPos.x = (paper.width * me.currZoom * settings.zoomStep);
+                        }
+
+                        if (me.currPos.y < 0) {
+                            me.currPos.y = 0;
+                        } else if (me.currPos.y > (paper.height * me.currZoom * settings.zoomStep)) {
+                            me.currPos.y = (paper.height * me.currZoom * settings.zoomStep);
+                        }
+                        paper.setViewBox(me.currPos.x, me.currPos.y, newWidth, newHeight);
+                    }
+
+                    function dragging(e) {
+                        if (!me.enabled) {
+                            return false;
+                        }
+                        var evt = window.event || e,
+                                newWidth = paper.width * (1 - (me.currZoom * settings.zoomStep)),
+                                newHeight = paper.height * (1 - (me.currZoom * settings.zoomStep)),
+                                newPoint = getRelativePosition(evt, container);
+
+                        deltaX = (newWidth * (newPoint.x - initialPos.x) / paper.width) * -1;
+                        deltaY = (newHeight * (newPoint.y - initialPos.y) / paper.height) * -1;
+                        initialPos = newPoint;
+
+                        repaint();
+                        me.dragTime += 1;
+                        if (evt.preventDefault) {
+                            evt.preventDefault();
+                        } else {
+                            evt.returnValue = false;
+                        }
+                        return false;
+                    }
+
+                    function applyZoom(val, centerPoint) {
+                        if (!me.zoomEnabled) {
+                            return false;
+                        }
+                        me.currZoom += val;
+                        if (me.currZoom < settings.minZoom) {
+                            me.currZoom = settings.minZoom;
+                        } else if (me.currZoom > settings.maxZoom) {
+                            me.currZoom = settings.maxZoom;
+                        } else {
+                            centerPoint = centerPoint || { x: paper.width / 2, y: paper.height / 2 };
+
+                            deltaX = ((paper.width * settings.zoomStep) * (centerPoint.x / paper.width)) * val;
+                            deltaY = (paper.height * settings.zoomStep) * (centerPoint.y / paper.height) * val;
+
+                            repaint();
+                        }
+                    }
+
+                    this.applyZoom = applyZoom;
+
+                    function handleScroll(e) {
+                        if (!me.zoomEnabled) {
+                            return false;
+                        }
+                        var evt = window.event || e,
+                                delta = evt.detail || evt.wheelDelta * -1,
+                                zoomCenter = getRelativePosition(evt, container);
+
+                        if (delta > 0) {
+                            delta = -1;
+                        } else if (delta < 0) {
+                            delta = 1;
+                        }
+
+                        applyZoom(delta, zoomCenter);
+                        if (evt.preventDefault) {
+                            evt.preventDefault();
+                        } else {
+                            evt.returnValue = false;
+                        }
+                        return false;
+                    }
+
+                    repaint();
+
+                    container.onmousedown = function (e) {
+                        var evt = window.event || e;
+                        if (!me.enabled || $(container).css('cursor') != 'pointer') {
+                            return false;
+                        }
+                        me.dragTime = 0;
+                        initialPos = getRelativePosition(evt, container);
+                        container.className += " grabbing";
+                        container.onmousemove = dragging;
+                        document.onmousemove = function () { return false; };
+                        if (evt.preventDefault) {
+                            evt.preventDefault();
+                        } else {
+                            evt.returnValue = false;
+                        }
+                        return false;
+                    };
+
+                    container.onmouseup = function (e) {
+                        //Remove class framework independent
+                        document.onmousemove = null;
+                        container.className = container.className.replace(/(?:^|\s)grabbing(?!\S)/g, '');
+                        container.onmousemove = null;
+                    };
+                    if (container.attachEvent) {//if IE (and Opera depending on user setting)
+                        container.attachEvent("on" + mousewheelevt, handleScroll);
+                    } else if (container.addEventListener) {//WC3 browsers
+                        container.addEventListener(mousewheelevt, handleScroll, false);
+                    }
+
+                    function applyPan(dX, dY) {
+                        deltaX = dX;
+                        deltaY = dY;
+                        repaint();
+                    }
+
+                    this.applyPan = applyPan;
+                };
+
+        PanZoom.prototype = panZoomFunctions;
+
+        Raphael.fn.panzoom = {};
+
+        Raphael.fn.panzoom = function (options) {
+            var paper = this;
+            return new PanZoom(paper, options);
+        };
+
+    }());
+
+    Raphael.fn.draggable = function (elem) {
+        var me = this, canvas = {},
+                dragger = function () {
+
+                    this.animate({
+                        "fill-opacity": 0.4
+                    }, 500);
+
+                    // read last translation
+                    elem.odx = elem.translate[0];
+                    elem.ody = elem.translate[1];
+                    canvas.currentCursor = $('#canvas').css('cursor');
+                    $('#canvas').css('cursor', 'default');
+
+                },
+                move = function (dx, dy) {
+                        dx = Math.round(dx * (1 - (zoomCurrent * zoomStep)));
+                        dy = Math.round(dy * (1 - (zoomCurrent * zoomStep)));
+                        // change translation
+                    elem.translate[0] = elem.odx + dx;
+                    elem.translate[1] = elem.ody + dy;
+                    var str = "t" + elem.translate[0] + "," + elem.translate[1];
+                    elem.transform(str);
+
+                },
+                up = function () {
+                    this.animate({
+                        "fill-opacity": 1
+                    }, 500);
+                    $('#canvas').css('cursor', canvas.currentCursor);
+                },
+
+                applyDragger = function () {
+                    elem.translate = [0, 0];
+                    elem.drag(move, dragger, up);
+                    return elem;
+                };
+
+
+        return applyDragger();
+
+    };
+
+    var container, panZoom, newShapeSwitch, newShape = false;
+    var raphaelPaint = (function () {
+        var paper, paint;
+
+
+        paint = function (x, y) {
+            var rect,
+                    str = "M" + x + "," + y + "L" + (x + 60) + "," + y + "L" + (x + 60) + "," + (y + 40) + "L" + x + "," + (y + 40) + "z";
+            rect = paper.path(str);
+            rect.attr({
+                "fill": "#86674d",
+                "stroke": "#97775e",
+                "stroke-width": 0.1
+            });
+
+            paper.draggable(rect);
+
+        };
+
+
+
+        return {
+
+            initialize: function () {
+                container = document.getElementById('canvas');
+                newShapeSwitch = document.getElementById('newShapeEnable');
+
+                paper = new Raphael(container, window.innerWidth, window.innerHeight);
+
+                panZoom = paper.panzoom({
+                    initialZoom: zoomInit,
+                    initialPosition: {x: 0, y: 0},
+                    zoomStep: zoomStep,
+                    maxZoom: maxZoom
+                });
+
+                panZoom.enable();
+
+                paint(window.innerWidth / 2 - 150, window.innerHeight / 2 - 100);
+
+                function onMouseWheel(event){
+                    event.preventDefault();
+
+                    // if ( scope.enabled === false ) return;
+
+                    var delta = 0;
+
+                    if ( event.wheelDelta ) {
+
+                        // WebKit / Opera / Explorer 9
+
+                        delta = - event.wheelDelta;
+
+                    } else if ( event.detail ) {
+
+                        // Firefox
+
+                        delta = event.detail * 10;
+
+                    }
+
+                    panZoom.zoomEnable();
+                    if (delta < 0 && panZoom.getCurrentZoom() < maxZoom) {
+                        panZoom.zoomIn(1);
+                    }
+                    else if (delta > 0 && panZoom.getCurrentZoom() > minZoom) {
+                        panZoom.zoomOut(1);
+                    }
+                    zoomCurrent = panZoom.getCurrentZoom();
+                    panZoom.zoomDisable();
+                }
+
+                container.addEventListener( 'mousewheel', onMouseWheel, false );
+                container.addEventListener( 'MozMousePixelScroll', onMouseWheel, false ); // firefox
+
+
+                function containerClick(e){
+                    e.preventDefault();
+                    var coord = raphaelPaint.getCoordinate(e.pageX, e.pageY),
+                            x0 = e.pageX, y0 = e.pageY, x = coord.x,
+                            y = coord.y, elem = paper
+                            .getElementByPoint(x0, y0);
+
+                    if(elem) {
+                        return true;
+                    }
+                    if(newShape)
+                        paint(x, y);
+                }
+
+                function enableNewShape(){
+                    $("#canvas").css('cursor', newShapeSwitch.checked ? 'default' : 'pointer');
+                    newShape = newShapeSwitch.checked;
+                }
+
+                container.addEventListener("click", containerClick, false);
+                newShapeSwitch.addEventListener("click", enableNewShape, false);
+
+
+
+            },
+
+
+
+            getCoordinate : function (x, y) {
+                var shiftY = Math.round($(container).offset().top) + 1,
+                        shiftX = Math.round($(container).offset().left) + 1,
+                        newX = (x - shiftX) * (1 - (panZoom.getCurrentZoom() * zoomStep)) + panZoom.getCurrentPosition().x,
+                        newY = (y - shiftY) * (1 - (panZoom.getCurrentZoom() * zoomStep)) + panZoom.getCurrentPosition().y;
+                return {x: Math.round(newX), y: Math.round(newY)};
+            }
+
+
+        };
+    }());
+
+    raphaelPaint.initialize();
+
+</script>
+
+</body>
+</html>
